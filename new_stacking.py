@@ -1,13 +1,18 @@
 import numpy as np
+import pickle
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
-import lightgbm as lgb
-import xgboost as xgb
+
 
 from user_retention_lgb import lgb_fit, lgb_predict
 from user_retention_lgb import Config as LGB_Config
+from user_retention_xgb import xgb_fit, xgb_predict
+from user_retention_xgb import Config as XGB_Config
+from user_retention_cgb import cgb_fit, cgb_predict
+from user_retention_cgb import Config as CGB_Config
 from utils_helper import *
+
 
 import logging.handlers
 import time
@@ -29,9 +34,12 @@ if __name__ == "__main__":
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
     X_train = train_df.drop(['user_id', 'label'], axis=1)
     y_train = train_df['label']
-    X_test = test_df.drop(['label'], axis=1)
+    test_user_id = test_df[['user_id']]
+    X_test = test_df.drop(['user_id','label'], axis=1)
     y_test = test_df['label']
-    print("----------------info-----------------------")
+    data_message = 'X_train.shape={}, X_test.shape={}'.format(X_train.shape, X_test.shape)
+    print(data_message)
+    logger.info(data_message)
 
     # Create base models
     num_folds = 5
@@ -40,57 +48,68 @@ if __name__ == "__main__":
     # Define Logistic Regression meta-model
     lr_model = LogisticRegression()
 
-    # Define XGBoost and LightGBM params
-    xgb_params = {'learning_rate': 0.05,
-                    'eval_metric': 'auc',
-                    'n_estimators': 5000,
-                    'max_depth': 6,
-                    'min_child_weight': 7,
-                    'gamma': 0,
-                    'subsample': 0.8,
-                    'colsample_bytree': 0.6,
-                    'eta': 0.05,  # 同 learning rate, Shrinkage（缩减），每次迭代完后叶子节点乘以这系数，削弱每棵树的权重
-                    'silent': 1,
-                    'objective': 'binary:logistic',
-                    'scale_pos_weight': 1}
-    
+    # config object
     lgb_config = LGB_Config()
+    xgb_config = XGB_Config()
+    cgb_config = CGB_Config()
 
     # Create arrays to hold predictions from base models
     xgb_train_pred = np.zeros(len(X_train))
     lgb_train_pred = np.zeros(len(X_train))
+    cgb_train_pred = np.zeros(len(X_train))
     xgb_test_pred = np.zeros(len(X_test))
     lgb_test_pred = np.zeros(len(X_test))
+    cgb_test_pred = np.zeros(len(X_test))
 
-    X_test = X_test.drop(['user_id'], axis=1)
+    tic = time.time()
 
     for fold_, (train_index, val_index) in enumerate(kf.split(X_train, y_train)):
         print(f'Fold {fold_+1}:')
         X_train_fold, X_val_fold = X_train.iloc[train_index], X_train.iloc[val_index]
         y_train_fold, y_val_fold = y_train.iloc[train_index], y_train.iloc[val_index]
 
-        lgb_train_data = lgb.Dataset(X_train_fold, label=y_train_fold)
-        lgb_valid_data = lgb.Dataset(X_val_fold, label=y_val_fold)
-        lgb_test_data = lgb.Dataset(X_test, label=y_test)
-
         # Fit and predict with LightGBM model
-        watchlist = [lgb_train_data, lgb_valid_data]
-        lgb_model = lgb.train(lgb_config.params, lgb_train_data, lgb_config.max_round, valid_sets=watchlist, early_stopping_rounds=lgb_config.early_stop_round)
-        
-        result = lgb_model.predict(X_val_fold, num_iteration=lgb_model.best_iteration)#对验证集得到预测结果
-        lgb_test_pred += lgb_model.predict(X_test, ntree_limit=lgb_model.best_iteration) / num_folds
+        lgb_model, best_auc, best_round, cv_result = lgb_fit(lgb_config, X_train_fold, y_train_fold)
+        print('Time cost {}s'.format(time.time() - tic))
+        result_message = 'LightGBM fished fold {}/{}, best_round={}, best_auc={}'.format(fold_, num_folds, best_round, best_auc)
+        logger.info(result_message)
+        print(result_message)
 
-        # xgb train and pred
-        xgb_train_data = xgb.DMatrix(X_train_fold, label=y_train_fold, enable_categorical=True)
-        xgb_valid_data = xgb.DMatrix(X_val_fold, label=y_val_fold, enable_categorical=True)
-        xgb_test_data = xgb.DMatrix(X_test, label=y_test, enable_categorical=True)
+        xgb_train_pred[val_index] = lgb_predict(lgb_model, X_val_fold)
+        now = time.strftime("%m%d-%H%M%S")
+        result_path = 'result/result_lgb_test_{}-{:.4f}.csv'.format(now, best_auc)
+        lgb_test_pred += lgb_predict(lgb_model, X_test, test_user_id, result_path) / num_folds
 
-        dtrain = xgb.DMatrix(X_train, label=y_train, enable_categorical=True)
-        watchlist = [(xgb_train_data, 'train'), (xgb_valid_data, 'valid_data')]
-        xgb_model = xgb.train(dtrain=xgb_train_data, num_boost_round=20000, evals=watchlist, early_stopping_rounds=200, verbose_eval=100, params=xgb_params)#80%用于训练过程
+        # Fit and predict with xgboost model
+        xgb_model, best_auc, best_round, cv_result = xgb_fit(xgb_config, X_train_fold, y_train_fold)
+        print('Time cost {}s'.format(time.time() - tic))
+        result_message = 'XGBoost fished fold {}/{}, best_round={}, best_auc={}'.format(fold_, num_folds, best_round, best_auc)
+        logger.info(result_message)
+        print(result_message)
 
-        xgb_train_pred[val_index] = xgb_model.predict(xgb_valid_data, ntree_limit=xgb_model.best_ntree_limit)#预测20%的验证集
-        xgb_test_pred += xgb_model.predict(xgb_test_data, ntree_limit=xgb_model.best_ntree_limit) / num_folds
+        # predict
+        xgb_train_pred[val_index] = xgb_predict(xgb_model, X_val_fold)
+        now = time.strftime("%m%d-%H%M%S")
+        result_path = 'result/result_xgb_{}-{:.4f}.csv'.format(now, best_auc)
+        xgb_test_pred += xgb_predict(xgb_model, X_test, test_user_id, result_path) / num_folds
+
+        # feature analyze
+        feature_score_path = 'features/xgb_feature_score.csv'
+        feature_analyze(xgb_model, csv_path=feature_score_path)
+
+        # Fit and predict with catboost model
+        cgb_model, best_auc, best_round, cv_result = cgb_fit(cgb_config, X_train_fold, y_train_fold)
+        print('Time cost {}s'.format(time.time() - tic))
+        result_message = 'CatBoost fished fold {}/{}, best_round={}, best_auc={}'.format(fold_, num_folds, best_round, best_auc)
+        logger.info(result_message)
+        print(result_message)
+
+        # predict
+        cgb_model = pickle.load(open(cgb_config.save_model_path, 'rb'))
+        now = time.strftime("%m%d-%H%M%S")
+        cgb_train_pred[val_index] = cgb_predict(cgb_model, X_val_fold)
+        result_path = 'result/result_cgb_{}.csv'.format(now)
+        xgb_test_pred += cgb_predict(cgb_model, X_test, test_user_id,result_path) / num_folds
 
     # Create meta-feature dataframes
     train_meta = pd.DataFrame({'XGB': xgb_train_pred, 'LGB': lgb_train_pred})
@@ -102,5 +121,9 @@ if __name__ == "__main__":
     test_pred = lr_model.predict_proba(test_meta)[:,1]
 
     # Print ROC AUC scores
-    print('Train ROC AUC:', roc_auc_score(y_train, train_pred))
-    print('Test ROC AUC:', roc_auc_score(y_test, test_pred))
+    message = 'Train ROC AUC:', roc_auc_score(y_train, train_pred)
+    print(message)
+    logger.info(message)
+    message = 'Test ROC AUC:', roc_auc_score(y_test, test_pred)
+    logger.info(message)
+    print(message)

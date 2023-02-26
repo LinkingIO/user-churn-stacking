@@ -90,13 +90,11 @@ def cgb_fit(config, X_train, y_train):
     return best_model, best_auc, best_round, cv_result
 
 
-def cgb_predict(model, X_test, save_result_path=None):
+def cgb_predict(model, X_test, user_id=None, save_result_path=None):
     if type(X_test) == np.ndarray:
         X_test = pd.DataFrame(X_test, columns=features)
         # apply the column data types to the DataFrame
         X_test = X_test.astype(dtype)
-    user_id = X_test[['user_id']]
-    X_test = X_test.drop(['user_id'], axis=1)
     y_pred_prob = model.predict(X_test, prediction_type='Probability')
     y_pred_prob = y_pred_prob[:, 1]  # get the probability of class 1
     if save_result_path:
