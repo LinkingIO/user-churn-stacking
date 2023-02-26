@@ -1,0 +1,12 @@
+
+# dir
+__pycache__/
+asset/
+data/
+features/
+log/
+result/
+model/
+
+# python file
+data_flag.py
