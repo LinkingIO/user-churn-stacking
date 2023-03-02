@@ -1,9 +1,8 @@
 import numpy as np
 import pickle
-from sklearn.model_selection import KFold, train_test_split
+from sklearn.model_selection import KFold, train_test_split, GridSearchCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
-
 
 from user_retention_lgb import lgb_fit, lgb_predict
 from user_retention_lgb import Config as LGB_Config
@@ -12,7 +11,6 @@ from user_retention_xgb import Config as XGB_Config
 from user_retention_cgb import cgb_fit, cgb_predict
 from user_retention_cgb import Config as CGB_Config
 from utils_helper import *
-
 
 import logging.handlers
 import time
@@ -46,7 +44,11 @@ if __name__ == "__main__":
     kf = KFold(n_splits=num_folds, shuffle=True, random_state=42)
 
     # Define Logistic Regression meta-model
-    lr_model = LogisticRegression()
+    param_grids = {
+        "C": list(np.linspace(0.0001, 10, 100))
+    }
+    # lr_model = LogisticRegression(max_iter=300, n_jobs=6)
+    grid = GridSearchCV(LogisticRegression(penalty='l2', max_iter=100), param_grid=param_grids, cv=5, scoring="roc_auc")
 
     # config object
     lgb_config = LGB_Config()
@@ -68,10 +70,22 @@ if __name__ == "__main__":
         X_train_fold, X_val_fold = X_train.iloc[train_index], X_train.iloc[val_index]
         y_train_fold, y_val_fold = y_train.iloc[train_index], y_train.iloc[val_index]
 
+        # #新增随机多样性，相同的算法更换随机数种子
+        # clf1 = RFC(n_estimators= 100,max_features="sqrt",max_samples=0.9, random_state=4869,n_jobs=8)
+        # estimators = ("RandomForest",clf1)
+
+        # cv = KFold(n_splits=5,shuffle=True,random_state=1412)
+        # cv_results = cross_validate(estimator[1],X_train, y_train
+        #                      ,cv = cv
+        #                      ,scoring = scoring
+        #                      ,n_jobs = -1
+        #                      ,return_train_score = True
+        #                      ,verbose=False)
+
         # Fit and predict with LightGBM model
         lgb_model, best_auc, best_round, cv_result = lgb_fit(lgb_config, X_train_fold, y_train_fold)
         print('Time cost {}s'.format(time.time() - tic))
-        result_message = 'LightGBM fished fold {}/{}, best_round={}, best_auc={}'.format(fold_, num_folds, best_round, best_auc)
+        result_message = 'LightGBM fished fold {}/{}, best_round={}, best_auc={}'.format(fold_ + 1, num_folds, best_round, best_auc)
         logger.info(result_message)
         print(result_message)
 
@@ -83,7 +97,7 @@ if __name__ == "__main__":
         # Fit and predict with xgboost model
         xgb_model, best_auc, best_round, cv_result = xgb_fit(xgb_config, X_train_fold, y_train_fold)
         print('Time cost {}s'.format(time.time() - tic))
-        result_message = 'XGBoost fished fold {}/{}, best_round={}, best_auc={}'.format(fold_, num_folds, best_round, best_auc)
+        result_message = 'XGBoost fished fold {}/{}, best_round={}, best_auc={}'.format(fold_ + 1, num_folds, best_round, best_auc)
         logger.info(result_message)
         print(result_message)
 
@@ -97,10 +111,10 @@ if __name__ == "__main__":
         feature_score_path = 'features/xgb_feature_score.csv'
         feature_analyze(xgb_model, csv_path=feature_score_path)
 
-        # Fit and predict with catboost model
+        # Fit and predict with CatBoost model
         cgb_model, best_auc, best_round, cv_result = cgb_fit(cgb_config, X_train_fold, y_train_fold)
         print('Time cost {}s'.format(time.time() - tic))
-        result_message = 'CatBoost fished fold {}/{}, best_round={}, best_auc={}'.format(fold_, num_folds, best_round, best_auc)
+        result_message = 'CatBoost fished fold {}/{}, best_round={}, best_auc={}'.format(fold_ + 1, num_folds, best_round, best_auc)
         logger.info(result_message)
         print(result_message)
 
@@ -112,13 +126,15 @@ if __name__ == "__main__":
         xgb_test_pred += cgb_predict(cgb_model, X_test, test_user_id,result_path) / num_folds
 
     # Create meta-feature dataframes
-    train_meta = pd.DataFrame({'XGB': xgb_train_pred, 'LGB': lgb_train_pred})
-    test_meta = pd.DataFrame({'XGB': xgb_test_pred, 'LGB': lgb_test_pred})
+    train_meta = pd.DataFrame({'XGB': xgb_train_pred, 'LGB': lgb_train_pred, 'CGB': cgb_train_pred})
+    test_meta = pd.DataFrame({'XGB': xgb_test_pred, 'LGB': lgb_test_pred, 'CGB': cgb_test_pred})
+    # train_meta = pd.DataFrame({'XGB': xgb_train_pred, 'CGB': cgb_train_pred})
+    # test_meta = pd.DataFrame({'XGB': xgb_test_pred, 'CGB': cgb_test_pred})
 
     # Fit meta-model on meta-features and make predictions
-    lr_model.fit(train_meta, y_train)
-    train_pred = lr_model.predict_proba(train_meta)[:,1]
-    test_pred = lr_model.predict_proba(test_meta)[:,1]
+    grid.fit(train_meta, y_train)
+    train_pred = grid.predict_proba(train_meta)[:,1]
+    test_pred = grid.predict_proba(test_meta)[:,1]
 
     # Print ROC AUC scores
     message = 'Train ROC AUC:', roc_auc_score(y_train, train_pred)
