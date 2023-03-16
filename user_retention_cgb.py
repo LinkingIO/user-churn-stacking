@@ -8,6 +8,7 @@ from utils_helper import *
 import numpy as np 
 import catboost as cgb
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
 import time
 import pickle
 import logging.handlers
@@ -27,15 +28,16 @@ logger.setLevel(logging.INFO)
 class Config(object):
     def __init__(self):
         self.params = {
-            'learning_rate': 0.05,
+            'learning_rate': 0.1,
             'eval_metric': 'AUC',
-            'depth': 8,
+            'depth': 6,
             'logging_level': 'Info',
             'loss_function': 'Logloss',
             'train_dir': 'model/cgb_record/',
             'thread_count': 6
         }
-        self.max_round = 300
+        # self.early_stop_round = 10
+        self.max_round = 500
         self.cv_folds = 5
         self.seed = 3
         self.save_model_path = 'model/cgb.model'
@@ -66,6 +68,7 @@ def cgb_fit(config, X_train, y_train):
     max_round = config.max_round
     cv_folds = config.cv_folds
     seed = config.seed
+    # early_stop_round = config.early_stop_round
     save_model_path = config.save_model_path
     cat_features_new = ['age_section', 'version', 'model', 'hometown', 'profession', 'source_channel']
 
@@ -113,7 +116,8 @@ if __name__ == '__main__':
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
     X_train = train_df.drop(['user_id','label'], axis=1)
     y_train = train_df['label']
-    X_test = test_df.drop('label', axis=1)
+    test_user_id = test_df[['user_id']]
+    X_test = test_df.drop(['user_id', 'label'], axis=1)
     y_test = test_df['label']
     data_message = 'X_train.shape={}, X_test.shape={}'.format(X_train.shape, X_test.shape)
     print(data_message)
@@ -139,4 +143,7 @@ if __name__ == '__main__':
     cgb_model = pickle.load(open(config.save_model_path, 'rb'))
     now = time.strftime("%m%d-%H%M%S")
     result_path = 'result/result_cgb_{}.csv'.format(now)
-    cgb_predict(cgb_model, X_test, result_path)
+    test_pred = cgb_predict(cgb_model, X_test, test_user_id, result_path)
+    message = 'Test ROC AUC:', roc_auc_score(y_test, test_pred)
+    logger.info(message)
+    print(message)

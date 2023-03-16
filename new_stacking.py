@@ -3,6 +3,7 @@ import pickle
 from sklearn.model_selection import KFold, train_test_split, GridSearchCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
+from sklearn.ensemble import RandomForestClassifier as RFC
 
 from user_retention_lgb import lgb_fit, lgb_predict
 from user_retention_lgb import Config as LGB_Config
@@ -49,6 +50,10 @@ if __name__ == "__main__":
     }
     # lr_model = LogisticRegression(max_iter=300, n_jobs=6)
     grid = GridSearchCV(LogisticRegression(penalty='l2', max_iter=100), param_grid=param_grids, cv=5, scoring="roc_auc")
+
+    final_estimator = RFC(n_estimators=100
+                        , min_impurity_decrease=0.0025
+                        , random_state= 420, n_jobs=6)
 
     # config object
     lgb_config = LGB_Config()
@@ -132,9 +137,9 @@ if __name__ == "__main__":
     # test_meta = pd.DataFrame({'XGB': xgb_test_pred, 'CGB': cgb_test_pred})
 
     # Fit meta-model on meta-features and make predictions
-    grid.fit(train_meta, y_train)
-    train_pred = grid.predict_proba(train_meta)[:,1]
-    test_pred = grid.predict_proba(test_meta)[:,1]
+    final_estimator.fit(train_meta, y_train)
+    train_pred = final_estimator.predict_proba(train_meta)[:,1]
+    test_pred = final_estimator.predict_proba(test_meta)[:,1]
 
     # Print ROC AUC scores
     message = 'Train ROC AUC:', roc_auc_score(y_train, train_pred)

@@ -9,29 +9,14 @@ import time
 import logging.handlers
 
 #算法辅助 & 数据
-import sklearn
-from sklearn.model_selection import KFold, RepeatedKFold
-from sklearn.model_selection import train_test_split, cross_validate
-from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
 import joblib
 from utils_helper import *
 
-
 #算法（单一学习器）
-from sklearn.neighbors import KNeighborsClassifier as KNNC
-from sklearn.neighbors import KNeighborsRegressor as KNNR
-from sklearn.tree import DecisionTreeRegressor as DTR
-from sklearn.tree import DecisionTreeClassifier as DTC
-from sklearn.linear_model import LinearRegression as LR
-from sklearn.linear_model import LogisticRegression as LogiR
-from sklearn.linear_model import BayesianRidge
-from sklearn.ensemble import RandomForestRegressor as RFR
-from sklearn.ensemble import RandomForestClassifier as RFC
-from sklearn.ensemble import GradientBoostingRegressor as GBR
-from sklearn.ensemble import GradientBoostingClassifier as GBC
-from sklearn.naive_bayes import GaussianNB
 import xgboost as xgb
-import lightgbm as lgb
+
 
 #融合模型
 from sklearn.ensemble import StackingClassifier
@@ -49,22 +34,23 @@ logger.setLevel(logging.INFO)
 
 class Config(object):
     def __init__(self):
-        self.params = {'learning_rate': 0.05,
+        self.params = {'learning_rate': 0.5,
                        'eval_metric': 'auc',
                        'n_estimators': 5000,
-                       'max_depth': 6,
-                       'min_child_weight': 7,
+                       'max_depth': 2,
+                       'min_child_weight': 5,
                        'gamma': 0,
                        'subsample': 0.8,
                        'colsample_bytree': 0.6,
                        'eta': 0.05,  # 同 learning rate, Shrinkage（缩减），每次迭代完后叶子节点乘以这系数，削弱每棵树的权重
                        'silent': 1,
+                    #    'alpha': 1,  # L1  regularization
                        'objective': 'binary:logistic',
                     #    'nthread': 8,
                        'scale_pos_weight': 1}
-        self.max_round = 1000
+        self.max_round = 500
         self.cv_folds = 5
-        self.early_stop_round = 200
+        self.early_stop_round = 100
         self.seed = 3
         self.save_model_path = 'model/xgb_user_retention.dat'
 
@@ -133,7 +119,7 @@ def xgb_predict(model, X_test, user_id=None, save_result_path=None):
     return y_pred_prob
 
 
-def run_cv(config, X_train, y_train, X_test):
+def run_cv(config, X_train, y_train, X_test, user_id = None):
     # train model
     tic = time.time()
 
@@ -143,16 +129,16 @@ def run_cv(config, X_train, y_train, X_test):
     logger.info(result_message)
     print(result_message)
 
-    # predict
-    now = time.strftime("%m%d-%H%M%S")
-    result_path = 'result/result_xgb_{}-{:.4f}.csv'.format(now, best_auc)
-    result = xgb_predict(xgb_model, X_test, result_path)
+    # # predict
+    # now = time.strftime("%m%d-%H%M%S")
+    # result_path = 'result/result_xgb_{}-{:.4f}.csv'.format(now, best_auc)
+    # result = xgb_predict(xgb_model, X_test, user_id, result_path)
 
     # feature analyze
-    feature_score_path = 'features/xgb_feature_score.csv'
-    feature_analyze(xgb_model, csv_path=feature_score_path)
+    # feature_score_path = 'features/xgb_feature_score.csv'
+    # feature_analyze(xgb_model, csv_path=feature_score_path, to_print=True, to_plot=True)
 
-    return result
+    # return result
 
 
 if __name__ == "__main__":
@@ -163,7 +149,8 @@ if __name__ == "__main__":
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
     X_train = train_df.drop(['user_id', 'label'], axis=1)
     y_train = train_df['label']
-    X_test = test_df.drop(['label'], axis=1)
+    test_user_id = test_df[['user_id']]
+    X_test = test_df.drop(['user_id', 'label'], axis=1)
     y_test = test_df['label']
 
     data_message = 'X_train.shape={}, X_test.shape={}'.format(X_train.shape, X_test.shape)
@@ -172,5 +159,10 @@ if __name__ == "__main__":
 
     config = Config()
 
-    run_cv(config, X_train, y_train, X_test)
+    run_cv(config, X_train, y_train, X_test, test_user_id)
+
+    # test_pred = run_cv(config, X_train, y_train, X_test, test_user_id)
+    # message = 'Test ROC AUC:', roc_auc_score(y_test, test_pred)
+    # logger.info(message)
+    # print(message)
 

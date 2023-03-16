@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import lightgbm as lgb
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+
 import time
 import logging.handlers
 
@@ -26,15 +28,16 @@ class Config(object):
         self.params = {
             'objective': 'binary',
             'metric': {'auc'},
-            'learning_rate': 0.05,
-            'num_leaves': 30,  # 叶子设置为 50 线下过拟合严重
+            'learning_rate': 0.8,
+            'num_leaves': 2,  # 叶子设置为 50 线下过拟合严重
             'min_sum_hessian_in_leaf': 0.1,
             'feature_fraction': 0.3,  # 相当于 colsample_bytree
             'bagging_fraction': 0.5,  # 相当于 subsample
             'lambda_l1': 0,
             'lambda_l2': 5,
             "verbose": -1,  # Set log level to Warning
-            'num_thread': 6  # 线程数设置为真实的 CPU 数，一般12线程的机器有6个物理核
+            'num_thread': 6,  # 线程数设置为真实的 CPU 数，一般12线程的机器有6个物理核
+            'lambda_l2': 1,
         }
         self.max_round = 500
         self.cv_folds = 5
@@ -106,7 +109,7 @@ def lgb_predict(model, X_test, user_id=None, save_result_path=None):
     return y_pred_prob
 
 
-def run_cv(config, X_train, X_test, y_train):
+def run_cv(config, X_train, X_test, y_train, user_id=None):
     config = Config()
     # train model
     tic = time.time()
@@ -120,7 +123,9 @@ def run_cv(config, X_train, X_test, y_train):
     # lgb_model = lgb.Booster(model_file=config.save_model_path)
     now = time.strftime("%m%d-%H%M%S")
     result_path = 'result/result_lgb_{}-{:.4f}.csv'.format(now, best_auc)
-    lgb_predict(lgb_model, X_test, result_path)
+    result = lgb_predict(lgb_model, X_test, user_id, result_path)
+
+    return result
 
 
 if __name__ == '__main__':
@@ -131,7 +136,8 @@ if __name__ == '__main__':
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
     X_train = train_df.drop(['user_id','label'], axis=1)
     y_train = train_df['label']
-    X_test = test_df.drop('label', axis=1)
+    test_user_id = test_df[['user_id']]
+    X_test = test_df.drop(['user_id', 'label'], axis=1)
     y_test = test_df['label']
 
     data_message = 'X_train.shape={}, X_test.shape={}'.format(X_train.shape, X_test.shape)
@@ -139,5 +145,8 @@ if __name__ == '__main__':
     logger.info(data_message)
 
     config = Config()
-    run_cv(config, X_train, X_test, y_train)
+    test_pred = run_cv(config, X_train, X_test, y_train, test_user_id)
+    message = 'Test ROC AUC:', roc_auc_score(y_test, test_pred)
+    logger.info(message)
+    print(message)
 

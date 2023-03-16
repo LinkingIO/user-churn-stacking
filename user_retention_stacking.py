@@ -302,7 +302,7 @@ def run_my_stack():
     X_train_stack, y_train_stack, X_test_stack = my_stacking(fit_funcs, predict_funcs, configs, X_train, y_train,
                                                              X_test)
     result_path = 'result/my_stack_result-{}.csv'.format(time.strftime("%m%d-%H%M%S"))
-    
+
     y_pred_prob = final_fit_predict(X_train_stack, y_train_stack, X_test_stack, save_result_path=result_path)
     return y_pred_prob
 

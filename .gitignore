@@ -6,6 +6,12 @@ features/
 log/
 result/
 model/
+catboost_info/
 
 # python file
 data_flag.py
+user_retention.ipynb
+utils_help.ipynb
+
+# SQL
+user_lost_feature.sql
